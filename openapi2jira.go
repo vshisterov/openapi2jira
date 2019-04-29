@@ -9,43 +9,43 @@ import (
 )
 
 type apiGroup struct {
-	Name 	string
-	Methods	[]apiMethod
+	Name    string
+	Methods []apiMethod
 }
 
 type apiMethod struct {
-	Summary				string
-	Method				string
-	Description			string
-	QueryParameters 	[]apiParameter
-	RequestSchema		apiParameterSchema
-	ResponseSchema		apiParameterSchema
-	Examples			[]apiExample
-	CustomTags			map[string]string
+	Summary         string
+	Method          string
+	Description     string
+	QueryParameters []apiParameter
+	RequestSchema   apiParameterSchema
+	ResponseSchema  apiParameterSchema
+	Examples        []apiExample
+	CustomTags      map[string]string
 }
 
 type apiParameter struct {
-	Name 		string
-	Type 		string
-	Description	string
-	Mandatory	bool
-	Schema		apiParameterSchema
+	Name        string
+	Type        string
+	Description string
+	Mandatory   bool
+	Schema      apiParameterSchema
+	Enum        []string
 }
 
 type apiParameterSchema struct {
-	Name					string
-	Attributes				[]apiParameter
-	HasMandatoryParameters 	bool
+	Name                   string
+	Attributes             []apiParameter
+	HasMandatoryParameters bool
 }
 
 type apiExample struct {
-	Title		string
-	Request		string
-	Response	string
+	Title    string
+	Request  string
+	Response string
 }
 
 type MapSlice yaml.MapSlice
-
 
 func main() {
 
@@ -83,22 +83,23 @@ func generate() error {
 
 func toJira(groups map[string]apiGroup) string {
 
-	builder := strings.Builder {}
+	builder := strings.Builder{}
 
-	for _, group := range groups{
-		fmt.Fprintf(&builder,"h3. %s", group.Name)
+	for _, group := range groups {
+		fmt.Fprintf(&builder, "h3. %s", group.Name)
 		fmt.Fprintln(&builder)
 
 		for _, method := range group.Methods {
 			fmt.Fprintf(&builder, "h4. %s\n", method.Summary)
 
-
-			if len(method.Description)>0 {fmt.Fprintln(&builder, method.Description) }
+			if len(method.Description) > 0 {
+				fmt.Fprintln(&builder, method.Description)
+			}
 
 			fmt.Fprintf(&builder, "*Method*: {noformat}%s{noformat}\n", method.Method)
 
 			for customTag, customTagValue := range method.CustomTags {
-				fmt.Fprintf(&builder,"*%s*: %s\n", customTag, customTagValue)
+				fmt.Fprintf(&builder, "*%s*: %s\n", customTag, customTagValue)
 			}
 
 			printParameters(&builder, "Query Parameters", method.QueryParameters, false)
@@ -117,7 +118,7 @@ func toJira(groups map[string]apiGroup) string {
 
 }
 
-func printParameters(builder *strings.Builder, header string, parameters []apiParameter, printMandatory bool ) {
+func printParameters(builder *strings.Builder, header string, parameters []apiParameter, printMandatory bool) {
 	if len(parameters) > 0 {
 
 		fmt.Fprintf(builder, "*%s*:\n", header)
@@ -133,9 +134,20 @@ func printParameters(builder *strings.Builder, header string, parameters []apiPa
 	}
 }
 
-func printParameter(builder *strings.Builder, parameter apiParameter, parameterPrefix string, printMandatory bool ) {
+func printParameter(builder *strings.Builder, parameter apiParameter, parameterPrefix string, printMandatory bool) {
 
-	fmt.Fprintf(builder, "| {{%s}} | %s | %s |", parameterPrefix + parameter.Name, parameter.Type, parameter.Description)
+
+	parameterType := parameter.Type
+	if len(parameter.Enum) > 0 {
+		enumDelimiter := ""
+		parameterType = ""
+		for _, enumValue := range parameter.Enum{
+			parameterType += enumDelimiter + "{{" + enumValue + "}}"
+			enumDelimiter = " \\| "
+		}
+	}
+
+	fmt.Fprintf(builder, "| {{%s}} | %s | %s |", parameterPrefix+parameter.Name, parameterType, parameter.Description)
 
 	if printMandatory {
 
@@ -202,53 +214,56 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 				var attributes []apiParameter
 				var requiredParameters []string
 
-				for _, definitionTagsNode := range definitionNode.Value.(MapSlice){
+				for _, definitionTagsNode := range definitionNode.Value.(MapSlice) {
 
 					switch definitionTagsNode.Key.(string) {
 					case "properties":
 
 						for _, propertyNode := range definitionTagsNode.Value.(MapSlice) {
 
-								attribute := apiParameter{}
+							attribute := apiParameter{}
 
-								attribute.Name = propertyNode.Key.(string)
+							attribute.Name = propertyNode.Key.(string)
 
-								for _, propertyAttributeNode := range propertyNode.Value.(MapSlice) {
-									switch propertyAttributeNode.Key.(string) {
-									case "type":
-										attribute.Type = propertyAttributeNode.Value.(string)
-									case "description":
-										attribute.Description = propertyAttributeNode.Value.(string)
-									case "$ref":
-										attribute.Schema.Name = strings.TrimPrefix(propertyAttributeNode.Value.(string),
-											"#/definitions/")
-									case "items":
-										for _, itemsNode := range propertyAttributeNode.Value.(MapSlice) {
+							for _, propertyAttributeNode := range propertyNode.Value.(MapSlice) {
+								switch propertyAttributeNode.Key.(string) {
+								case "type":
+									attribute.Type = propertyAttributeNode.Value.(string)
+								case "description":
+									attribute.Description = propertyAttributeNode.Value.(string)
+								case "$ref":
+									attribute.Schema.Name = strings.TrimPrefix(propertyAttributeNode.Value.(string),
+										"#/definitions/")
+								case "items":
+									for _, itemsNode := range propertyAttributeNode.Value.(MapSlice) {
 
-											switch itemsNode.Key.(string) {
-											case "$ref":
-												attribute.Schema.Name = strings.TrimPrefix(itemsNode.Value.(string), "#/definitions/")
-											case "type":
-												attribute.Type = "array of " + itemsNode.Value.(string)
-											case "description":
-												attribute.Description = itemsNode.Value.(string)
-											}
+										switch itemsNode.Key.(string) {
+										case "$ref":
+											attribute.Schema.Name = strings.TrimPrefix(itemsNode.Value.(string), "#/definitions/")
+										case "type":
+											attribute.Type = "array of " + itemsNode.Value.(string)
+										case "description":
+											attribute.Description = itemsNode.Value.(string)
 										}
 									}
-
-
+								case "enum":
+									for _, enumValueNode := range propertyAttributeNode.Value.([]interface{}) {
+										attribute.Enum = append(attribute.Enum, enumValueNode.(string))
+									}
 								}
-								attributes = append(attributes, attribute)
+
+							}
+							attributes = append(attributes, attribute)
 						}
 					case "required":
-						for _, requiredNode := range definitionTagsNode.Value.([]interface{}){
+						for _, requiredNode := range definitionTagsNode.Value.([]interface{}) {
 							requiredParameters = append(requiredParameters, requiredNode.(string))
 						}
 					}
 
 				}
 
-				for requiredParameter := range requiredParameters{
+				for requiredParameter := range requiredParameters {
 					attributes[requiredParameter].Mandatory = true
 					definition.HasMandatoryParameters = true
 				}
@@ -259,12 +274,9 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 
 			}
 
-
-
 		}
 
 	}
-
 
 	for _, definition := range definitions {
 
@@ -282,8 +294,7 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 
 	}
 
-	for _, group := range result{
-
+	for _, group := range result {
 
 		for i, method := range group.Methods {
 
@@ -303,7 +314,7 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 
 func parsePaths(pathNodes MapSlice) map[string]apiGroup {
 
-	result :=map[string]apiGroup{}
+	result := map[string]apiGroup{}
 
 	for _, pathNode := range pathNodes {
 
@@ -360,7 +371,7 @@ func parseMethod(methodNode yaml.MapItem, groups map[string]apiGroup, path strin
 			}
 
 		case "responses":
-			for _, responseNode := range  methodPropertyNode.Value.(MapSlice) {
+			for _, responseNode := range methodPropertyNode.Value.(MapSlice) {
 				if responseNode.Key.(string) == "200" || responseNode.Key.(string) == "201" || responseNode.Key.(string) == "default" {
 					for _, responsePropertyNode := range responseNode.Value.(MapSlice) {
 						if responsePropertyNode.Key.(string) == "schema" {
@@ -369,7 +380,7 @@ func parseMethod(methodNode yaml.MapItem, groups map[string]apiGroup, path strin
 									method.ResponseSchema.Name = strings.TrimPrefix(schemaPropertyNode.Value.(string), "#/definitions/")
 								}
 								if schemaPropertyNode.Key.(string) == "items" {
-									for _, itemsPropertyNode := range schemaPropertyNode.Value.(MapSlice){
+									for _, itemsPropertyNode := range schemaPropertyNode.Value.(MapSlice) {
 										if itemsPropertyNode.Key.(string) == "$ref" {
 											method.ResponseSchema.Name = strings.TrimPrefix(itemsPropertyNode.Value.(string), "#/definitions/")
 										}
@@ -392,7 +403,7 @@ func parseMethod(methodNode yaml.MapItem, groups map[string]apiGroup, path strin
 	groups[group.Name] = group
 }
 
-func addCustomTag(method apiMethod, name string,  value string) {
+func addCustomTag(method apiMethod, name string, value string) {
 	customTag := strings.Title(strings.ReplaceAll(strings.TrimPrefix(name, "x-"), "-", " "))
 	method.CustomTags[customTag] = value
 }
@@ -424,7 +435,7 @@ func parseParameter(parameterNode interface{}, method *apiMethod) {
 					parameter.Schema.Name = strings.TrimPrefix(schemaPropertyNode.Value.(string), "#/definitions/")
 				}
 				if schemaPropertyNode.Key.(string) == "items" {
-					for _, itemsPropertyNode := range schemaPropertyNode.Value.(MapSlice){
+					for _, itemsPropertyNode := range schemaPropertyNode.Value.(MapSlice) {
 						if itemsPropertyNode.Key.(string) == "$ref" {
 							parameter.Schema.Name = strings.TrimPrefix(itemsPropertyNode.Value.(string), "#/definitions/")
 						}
@@ -432,6 +443,11 @@ func parseParameter(parameterNode interface{}, method *apiMethod) {
 				}
 			}
 
+		case "enum":
+			for _, enumValueNode := range parameterPropertyNode.Value.([]interface{}) {
+				parameter.Enum = append(parameter.Enum, enumValueNode.(string))
+			}
+			
 		case "in":
 			switch parameterPropertyNode.Value.(string) {
 			case "query":
@@ -453,7 +469,7 @@ func parseParameter(parameterNode interface{}, method *apiMethod) {
 		method.RequestSchema.Name = parameter.Schema.Name
 	}
 
-	if isFormData{
+	if isFormData {
 
 		method.RequestSchema.Attributes = append(method.RequestSchema.Attributes, parameter)
 	}
