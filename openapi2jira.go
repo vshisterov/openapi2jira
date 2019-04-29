@@ -28,12 +28,14 @@ type apiParameter struct {
 	Name 		string
 	Type 		string
 	Description	string
+	Mandatory	bool
 	Schema		apiParameterSchema
 }
 
 type apiParameterSchema struct {
-	Name		string
-	Attributes	[]apiParameter
+	Name					string
+	Attributes				[]apiParameter
+	HasMandatoryParameters 	bool
 }
 
 type apiExample struct {
@@ -53,7 +55,7 @@ func main() {
 
 func generate() error {
 
-	specFile := "petstore.yml"
+	specFile := "test.yml"
 
 	spec, err := loadSpec(specFile)
 
@@ -66,7 +68,14 @@ func generate() error {
 
 	description := toJira(apiGroups)
 
-	fmt.Println(description)
+	fmt.Println("Writing results")
+
+	err = ioutil.WriteFile("test.txt", []byte(description), 0644)
+
+	if err != nil {
+		fmt.Println("Error writing results", specFile, ":", err)
+		return err
+	}
 
 	return nil
 
@@ -92,9 +101,9 @@ func toJira(groups map[string]apiGroup) string {
 				fmt.Fprintf(&builder,"*%s*: %s\n", customTag, customTagValue)
 			}
 
-			printParameters(&builder, "Query Parameters", method.QueryParameters)
-			printParameters(&builder, "Request Parameters", method.RequestSchema.Attributes)
-			printParameters(&builder, "Response Attributes", method.ResponseSchema.Attributes)
+			printParameters(&builder, "Query Parameters", method.QueryParameters, false)
+			printParameters(&builder, "Request Parameters", method.RequestSchema.Attributes, method.RequestSchema.HasMandatoryParameters)
+			printParameters(&builder, "Response Attributes", method.ResponseSchema.Attributes, false)
 
 			fmt.Fprintln(&builder)
 
@@ -108,26 +117,42 @@ func toJira(groups map[string]apiGroup) string {
 
 }
 
-func printParameters(builder *strings.Builder, header string, parameters []apiParameter ) {
+func printParameters(builder *strings.Builder, header string, parameters []apiParameter, printMandatory bool ) {
 	if len(parameters) > 0 {
 
 		fmt.Fprintf(builder, "*%s*:\n", header)
-		fmt.Fprintln(builder, "|| Name || Type || Description ||")
+		fmt.Fprint(builder, "|| Name || Type || Description ||")
+		if printMandatory {
+			fmt.Fprint(builder, " Mandatory ||")
+		}
+		fmt.Fprintln(builder)
 
 		for _, parameter := range parameters {
-			printParameter(builder, parameter, "")
+			printParameter(builder, parameter, "", printMandatory)
 		}
 	}
 }
 
-func printParameter(builder *strings.Builder, parameter apiParameter, parameterPrefix string) {
+func printParameter(builder *strings.Builder, parameter apiParameter, parameterPrefix string, printMandatory bool ) {
 
-	fmt.Fprintf(builder, "| {{%s}} | %s | %s |\n", parameterPrefix + parameter.Name, parameter.Type, parameter.Description)
+	fmt.Fprintf(builder, "| {{%s}} | %s | %s |", parameterPrefix + parameter.Name, parameter.Type, parameter.Description)
+
+	if printMandatory {
+
+		checkMark := " "
+		if parameter.Mandatory {
+			checkMark = "(/)"
+		}
+
+		fmt.Fprintf(builder, " %s |", checkMark)
+	}
+
+	fmt.Fprintln(builder)
 
 	parameterPrefix += parameter.Name + "."
 
 	for _, nestedParameter := range parameter.Schema.Attributes {
-		printParameter(builder, nestedParameter, parameterPrefix)
+		printParameter(builder, nestedParameter, parameterPrefix, printMandatory)
 	}
 }
 
@@ -175,10 +200,12 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 				definition.Name = definitionNode.Key.(string)
 
 				var attributes []apiParameter
+				var requiredParameters []string
 
 				for _, definitionTagsNode := range definitionNode.Value.(MapSlice){
 
-					if definitionTagsNode.Key.(string) == "properties" {
+					switch definitionTagsNode.Key.(string) {
+					case "properties":
 
 						for _, propertyNode := range definitionTagsNode.Value.(MapSlice) {
 
@@ -213,9 +240,17 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 								}
 								attributes = append(attributes, attribute)
 						}
-
+					case "required":
+						for _, requiredNode := range definitionTagsNode.Value.([]interface{}){
+							requiredParameters = append(requiredParameters, requiredNode.(string))
+						}
 					}
 
+				}
+
+				for requiredParameter := range requiredParameters{
+					attributes[requiredParameter].Mandatory = true
+					definition.HasMandatoryParameters = true
 				}
 
 				definition.Attributes = attributes
