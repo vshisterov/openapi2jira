@@ -2,50 +2,55 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"strings"
 
 	"gopkg.in/yaml.v2"
 )
 
-type apiGroup struct {
+type APIGroup struct {
 	Name    string
-	Methods []apiMethod
+	Methods []APIMethod
 }
 
-type apiMethod struct {
+type APIMethod struct {
 	Summary         string
 	Method          string
 	Description     string
-	QueryParameters []apiParameter
-	RequestSchema   apiParameterSchema
-	ResponseSchema  apiParameterSchema
-	Examples        []apiExample
+	QueryParameters []APIParam
+	RequestSchema   APIParamaSchema
+	ResponseSchema  APIParamaSchema
+	Examples        []APIExample
 	CustomTags      map[string]string
 }
 
-type apiParameter struct {
+type APIParam struct {
 	Name        string
 	Type        string
 	Description string
 	Mandatory   bool
-	Schema      apiParameterSchema
+	Schema      APIParamaSchema
 	Enum        []string
 }
 
-type apiParameterSchema struct {
-	Name                   string
-	Attributes             []apiParameter
-	HasMandatoryParameters bool
+type APIParamaSchema struct {
+	Name               string
+	Attributes         []APIParam
+	HasMandatoryParams bool
 }
 
-type apiExample struct {
+type APIExample struct {
 	Title    string
 	Request  string
 	Response string
 }
 
 type MapSlice yaml.MapSlice
+
+const HeaderTop = 3
+const HeaderRegular = 4
+const HeaderLite = -1
 
 func main() {
 
@@ -55,117 +60,188 @@ func main() {
 
 func generate() error {
 
-	specFile := "test.yml"
+	in := "test.yml"
+	out := "text.txt"
 
-	spec, err := loadSpec(specFile)
-
+	spec, err := loadSpec(in)
 	if err != nil {
-		fmt.Println("Error reading spec", specFile, ":", err)
+		fmt.Println("Error reading spec", in, ":", err)
 		return err
 	}
 
-	apiGroups := parseSpec(spec)
-
-	description := toJira(apiGroups)
+	g := parse(spec)
+	s := toJira(g)
 
 	fmt.Println("Writing results")
 
-	err = ioutil.WriteFile("test.txt", []byte(description), 0644)
-
+	err = ioutil.WriteFile(out, []byte(s), 0644)
 	if err != nil {
-		fmt.Println("Error writing results", specFile, ":", err)
+		fmt.Println("Error writing results", in, ":", err)
 		return err
 	}
+
+	fmt.Println(s)
 
 	return nil
 
 }
 
-func toJira(groups map[string]apiGroup) string {
+func toJira(groups map[string]APIGroup) string {
 
-	builder := strings.Builder{}
+	b := strings.Builder{}
 
-	for _, group := range groups {
-		fmt.Fprintf(&builder, "h3. %s", group.Name)
-		fmt.Fprintln(&builder)
-
-		for _, method := range group.Methods {
-			fmt.Fprintf(&builder, "h4. %s\n", method.Summary)
-
-			if len(method.Description) > 0 {
-				fmt.Fprintln(&builder, method.Description)
-			}
-
-			fmt.Fprintf(&builder, "*Method*: {noformat}%s{noformat}\n", method.Method)
-
-			for customTag, customTagValue := range method.CustomTags {
-				fmt.Fprintf(&builder, "*%s*: %s\n", customTag, customTagValue)
-			}
-
-			printParameters(&builder, "Query Parameters", method.QueryParameters, false)
-			printParameters(&builder, "Request Parameters", method.RequestSchema.Attributes, method.RequestSchema.HasMandatoryParameters)
-			printParameters(&builder, "Response Attributes", method.ResponseSchema.Attributes, false)
-
-			fmt.Fprintln(&builder)
-
-		}
-
-		fmt.Fprintln(&builder)
-
+	for _, g := range groups {
+		printAPIGroup(&b, g)
 	}
 
-	return builder.String()
+	return b.String()
 
 }
 
-func printParameters(builder *strings.Builder, header string, parameters []apiParameter, printMandatory bool) {
-	if len(parameters) > 0 {
+func printAPIGroup(w io.Writer, g APIGroup) {
+	printHeader(w, g.Name, HeaderTop)
+	printAPIMethods(w, g.Methods)
+	printNewLine(w)
+}
 
-		fmt.Fprintf(builder, "*%s*:\n", header)
-		fmt.Fprint(builder, "|| Name || Type || Description ||")
-		if printMandatory {
-			fmt.Fprint(builder, " Mandatory ||")
-		}
-		fmt.Fprintln(builder)
+func printHeader(w io.Writer, s string, level int)  {
+	if level > HeaderLite {
+		fmt.Fprintf(w, "h%d. %s\n", level, s)
+	} else {
+		fmt.Fprintf(w, "*%s*:\n", s)
+	}
+}
 
-		for _, parameter := range parameters {
-			printParameter(builder, parameter, "", printMandatory)
+func printAPIMethods(w io.Writer, methods []APIMethod) {
+	for _, m := range methods {
+		printAPIMethod(w, m)
+	}
+}
+
+func printAPIMethod(w io.Writer, m APIMethod) {
+	printHeader(w, m.Summary, HeaderRegular)
+	printNotEmpty(w, m.Description)
+	printMethod(w, m.Method)
+	printExtensions(w, m.CustomTags)
+	printParams(w, "Query Parameters", m.QueryParameters, false)
+	printParams(w, "Request Parameters", m.RequestSchema.Attributes, m.RequestSchema.HasMandatoryParams)
+	printParams(w, "Response Attributes", m.ResponseSchema.Attributes, false)
+	printNewLine(w)
+}
+
+
+func printNotEmpty(w io.Writer, s string) {
+	if len(s) > 0 {
+		fmt.Fprintln(w, s)
+	}
+}
+
+
+func printMethod(w io.Writer, method string) {
+	printPair(w, "Method", fmt.Sprintf("{noformat}%s{noformat}", method))
+}
+
+func printPair(w io.Writer, key string, value string) {
+	fmt.Fprintf(w, "*%s*: %s\n", key, value)
+}
+
+func printExtensions(w io.Writer, tags map[string]string ) {
+	for t, v := range tags {
+		printPair(w, t, v)
+	}
+}
+
+func printParams(w  io.Writer, header string, params []APIParam, mandatory bool) {
+	if len(params) > 0 {
+
+		printHeader(w, header, HeaderLite)
+
+		printColumns(w, mandatory)
+
+		for _, parameter := range params {
+			printParam(w, parameter, "", mandatory)
 		}
 	}
 }
 
-func printParameter(builder *strings.Builder, parameter apiParameter, parameterPrefix string, printMandatory bool) {
+func printColumns(w io.Writer, mandatory bool) {
 
+	columns := []string { "Name", "Type"}
+	if mandatory {
+		columns = append(columns, "Mandatory")
+	}
+	columns = append(columns, "Description")
 
-	parameterType := parameter.Type
-	if len(parameter.Enum) > 0 {
+	fmt.Fprint(w, "||")
+
+	for _, c := range columns {
+		fmt.Fprint(w, " ", c, " ||")
+	}
+
+	fmt.Fprintln(w)
+}
+
+func printParam(w io.Writer, p APIParam, prefix string, mandatory bool) {
+
+	printCellDelimiter(w)
+	
+	n := getMonospaced(prefix + p.Name)
+	printCell(w, n)
+	
+	t := getParamType(p)
+	printCell(w, t)
+
+	if mandatory {
+		m := getCheck(p.Mandatory)
+		printCell(w, m)
+	}
+
+	printCell(w, p.Description)
+
+	printNewLine(w)
+
+	prefix += p.Name + "."
+
+	for _, nestedParameter := range p.Schema.Attributes {
+		printParam(w, nestedParameter, prefix, mandatory)
+	}
+}
+
+func printCellDelimiter(w io.Writer) {
+	fmt.Fprint(w, "|")
+}
+
+func printCell(w io.Writer, s string){
+	fmt.Fprintf(w, " %s |", s)
+}
+
+func getMonospaced(s string) string {
+	return fmt.Sprintf("{{%s}}", s)
+}
+
+func getParamType(p APIParam) string {
+	s := p.Type
+	if len(p.Enum) > 0 {
 		enumDelimiter := ""
-		parameterType = ""
-		for _, enumValue := range parameter.Enum{
-			parameterType += enumDelimiter + "{{" + enumValue + "}}"
+		s = ""
+		for _, enumValue := range p.Enum {
+			s += enumDelimiter + "{{" + enumValue + "}}"
 			enumDelimiter = " \\| "
 		}
 	}
+	return s
+}
 
-	fmt.Fprintf(builder, "| {{%s}} | %s | %s |", parameterPrefix+parameter.Name, parameterType, parameter.Description)
-
-	if printMandatory {
-
-		checkMark := " "
-		if parameter.Mandatory {
-			checkMark = "(/)"
-		}
-
-		fmt.Fprintf(builder, " %s |", checkMark)
+func getCheck(b bool) string {
+	check := " "
+	if b {
+		check = "(/)"
 	}
+	return check
+}
 
-	fmt.Fprintln(builder)
-
-	parameterPrefix += parameter.Name + "."
-
-	for _, nestedParameter := range parameter.Schema.Attributes {
-		printParameter(builder, nestedParameter, parameterPrefix, printMandatory)
-	}
+func printNewLine(w io.Writer) {
+	fmt.Fprintln(w)
 }
 
 func loadSpec(f string) (MapSlice, error) {
@@ -186,11 +262,11 @@ func readYaml(fileName string) (MapSlice, error) {
 	return m, nil
 }
 
-func parseSpec(spec MapSlice) map[string]apiGroup {
+func parse(spec MapSlice) map[string]APIGroup {
 
-	result := map[string]apiGroup{}
+	result := map[string]APIGroup{}
 
-	definitions := map[string]apiParameterSchema{}
+	definitions := map[string]APIParamaSchema{}
 
 	for i := range spec {
 
@@ -208,10 +284,10 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 
 			for _, definitionNode := range definitionsNode {
 
-				definition := apiParameterSchema{}
+				definition := APIParamaSchema{}
 				definition.Name = definitionNode.Key.(string)
 
-				var attributes []apiParameter
+				var attributes []APIParam
 				var requiredParameters []string
 
 				for _, definitionTagsNode := range definitionNode.Value.(MapSlice) {
@@ -221,7 +297,7 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 
 						for _, propertyNode := range definitionTagsNode.Value.(MapSlice) {
 
-							attribute := apiParameter{}
+							attribute := APIParam{}
 
 							attribute.Name = propertyNode.Key.(string)
 
@@ -265,7 +341,7 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 
 				for requiredParameter := range requiredParameters {
 					attributes[requiredParameter].Mandatory = true
-					definition.HasMandatoryParameters = true
+					definition.HasMandatoryParams = true
 				}
 
 				definition.Attributes = attributes
@@ -312,9 +388,9 @@ func parseSpec(spec MapSlice) map[string]apiGroup {
 	return result
 }
 
-func parsePaths(pathNodes MapSlice) map[string]apiGroup {
+func parsePaths(pathNodes MapSlice) map[string]APIGroup {
 
-	result := map[string]apiGroup{}
+	result := map[string]APIGroup{}
 
 	for _, pathNode := range pathNodes {
 
@@ -326,7 +402,7 @@ func parsePaths(pathNodes MapSlice) map[string]apiGroup {
 
 }
 
-func parsePath(pathNode yaml.MapItem, groups map[string]apiGroup) {
+func parsePath(pathNode yaml.MapItem, groups map[string]APIGroup) {
 	path := pathNode.Key.(string)
 	fmt.Println("Parsing path", path)
 	for _, methodNode := range pathNode.Value.(MapSlice) {
@@ -336,16 +412,16 @@ func parsePath(pathNode yaml.MapItem, groups map[string]apiGroup) {
 	}
 }
 
-func parseMethod(methodNode yaml.MapItem, groups map[string]apiGroup, path string) {
+func parseMethod(methodNode yaml.MapItem, groups map[string]APIGroup, path string) {
 
 	httpMethod := strings.ToUpper(methodNode.Key.(string))
 
 	group, ok := groups["Unknown"]
 	if !ok {
-		group = apiGroup{"Unknown", []apiMethod{}}
+		group = APIGroup{"Unknown", []APIMethod{}}
 	}
 
-	method := apiMethod{}
+	method := APIMethod{}
 	method.CustomTags = map[string]string{}
 	method.Method = fmt.Sprintf("%s %s", httpMethod, path)
 
@@ -403,14 +479,14 @@ func parseMethod(methodNode yaml.MapItem, groups map[string]apiGroup, path strin
 	groups[group.Name] = group
 }
 
-func addCustomTag(method apiMethod, name string, value string) {
+func addCustomTag(method APIMethod, name string, value string) {
 	customTag := strings.Title(strings.ReplaceAll(strings.TrimPrefix(name, "x-"), "-", " "))
 	method.CustomTags[customTag] = value
 }
 
-func parseParameter(parameterNode interface{}, method *apiMethod) {
+func parseParameter(parameterNode interface{}, method *APIMethod) {
 
-	parameter := apiParameter{}
+	parameter := APIParam{}
 
 	isQuery := false
 	isBody := false
@@ -447,7 +523,7 @@ func parseParameter(parameterNode interface{}, method *apiMethod) {
 			for _, enumValueNode := range parameterPropertyNode.Value.([]interface{}) {
 				parameter.Enum = append(parameter.Enum, enumValueNode.(string))
 			}
-			
+
 		case "in":
 			switch parameterPropertyNode.Value.(string) {
 			case "query":
@@ -476,7 +552,7 @@ func parseParameter(parameterNode interface{}, method *apiMethod) {
 
 }
 
-func getGroupByName(groups map[string]apiGroup, group apiGroup, name string) apiGroup {
+func getGroupByName(groups map[string]APIGroup, group APIGroup, name string) APIGroup {
 	existingGroup, ok := groups[name]
 	if ok {
 		group = existingGroup
