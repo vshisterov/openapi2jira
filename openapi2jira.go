@@ -15,14 +15,14 @@ type APIGroup struct {
 }
 
 type APIMethod struct {
-	Summary         string
-	Method          string
-	Description     string
-	QueryParameters []APIParam
-	RequestSchema   APIParamaSchema
-	ResponseSchema  APIParamaSchema
-	Examples        []APIExample
-	CustomTags      map[string]string
+	Summary        string
+	Method         string
+	Description    string
+	QueryParams    []APIParam
+	RequestSchema  APIParamSchema
+	ResponseSchema APIParamSchema
+	Examples       []APIExample
+	CustomTags     map[string]string
 }
 
 type APIParam struct {
@@ -30,11 +30,11 @@ type APIParam struct {
 	Type        string
 	Description string
 	Mandatory   bool
-	Schema      APIParamaSchema
+	Schema      APIParamSchema
 	Enum        []string
 }
 
-type APIParamaSchema struct {
+type APIParamSchema struct {
 	Name               string
 	Attributes         []APIParam
 	HasMandatoryParams bool
@@ -123,7 +123,7 @@ func printAPIMethod(w io.Writer, m APIMethod) {
 	printNotEmpty(w, m.Description)
 	printMethod(w, m.Method)
 	printExtensions(w, m.CustomTags)
-	printParams(w, "Query Parameters", m.QueryParameters, false)
+	printParams(w, "Query Parameters", m.QueryParams, false)
 	printParams(w, "Request Parameters", m.RequestSchema.Attributes, m.RequestSchema.HasMandatoryParams)
 	printParams(w, "Response Attributes", m.ResponseSchema.Attributes, false)
 	printNewLine(w)
@@ -266,7 +266,7 @@ func parse(spec MapSlice) map[string]APIGroup {
 
 	result := map[string]APIGroup{}
 
-	definitions := map[string]APIParamaSchema{}
+	definitions := map[string]APIParamSchema{}
 
 	for i := range spec {
 
@@ -284,7 +284,7 @@ func parse(spec MapSlice) map[string]APIGroup {
 
 			for _, definitionNode := range definitionsNode {
 
-				definition := APIParamaSchema{}
+				definition := APIParamSchema{}
 				definition.Name = definitionNode.Key.(string)
 
 				var attributes []APIParam
@@ -538,7 +538,7 @@ func parseParameter(parameterNode interface{}, method *APIMethod) {
 	}
 
 	if isQuery {
-		method.QueryParameters = append(method.QueryParameters, parameter)
+		method.QueryParams = append(method.QueryParams, parameter)
 	}
 
 	if isBody {
