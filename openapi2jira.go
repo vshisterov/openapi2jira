@@ -17,8 +17,15 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println("Parsing file", in)
+	fmt.Println("Conveting file:", in)
 
+	Convert(in, out)
+
+	fmt.Println("Completed:", out)
+}
+
+func Convert(in string, out string) {
+	
 	g, err := openapi.ParseFile(in)
 	if err != nil {
 		fmt.Println("Error reading spec", in, ":", err)
@@ -27,13 +34,8 @@ func main() {
 
 	s := jira.ToJira(g)
 
-	fmt.Println("Writing results to", out)
-
 	err = ioutil.WriteFile(out, []byte(s), 0644)
 	if err != nil {
 		fmt.Println("Error writing results", in, ":", err)
 	}
-
-	//fmt.Println(s)
-
 }

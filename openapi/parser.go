@@ -106,7 +106,7 @@ func parsePaths(s yaml.MapSlice) map[string]Group {
 	for i := range s {
 		path := s[i].Key.(string)
 
-		fmt.Println("Parsing path", path)
+		// fmt.Println("Parsing path", path)
 
 		for _, o := range s[i].Value.(yaml.MapSlice) {
 
