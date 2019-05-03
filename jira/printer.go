@@ -7,11 +7,11 @@ import (
 	"strings"
 )
 
-const HeaderTop = 3
-const HeaderRegular = 4
-const HeaderLite = -1
+const HeaderBig = 3
+const HeaderNormal = 4
+const HeaderLite = 99
 
-func ToJira(groups map[string]openapi.APIGroup) string {
+func ToJira(groups map[string]openapi.Group) string {
 
 	b := strings.Builder{}
 
@@ -23,28 +23,32 @@ func ToJira(groups map[string]openapi.APIGroup) string {
 
 }
 
-func printAPIGroup(w io.Writer, g openapi.APIGroup) {
-	printHeader(w, g.Name, HeaderTop)
-	printAPIMethods(w, g.Methods)
+func printAPIGroup(w io.Writer, g openapi.Group) {
+	printHeader(w, g.Name, HeaderBig)
+	printAPIMethods(w, g.Operations)
 	printNewLine(w)
 }
 
-func printHeader(w io.Writer, s string, level int)  {
-	if level > HeaderLite {
+func printHeader(w io.Writer, s string, level int) {
+	if level < 7 {
 		fmt.Fprintf(w, "h%d. %s\n", level, s)
 	} else {
-		fmt.Fprintf(w, "*%s*:\n", s)
+		fmt.Fprintf(w, "%s:\n", getBold(s))
 	}
 }
 
-func printAPIMethods(w io.Writer, methods []openapi.APIMethod) {
+func printAPIMethods(w io.Writer, methods []openapi.Operation) {
 	for _, m := range methods {
 		printAPIMethod(w, m)
 	}
 }
 
-func printAPIMethod(w io.Writer, m openapi.APIMethod) {
-	printHeader(w, m.Summary, HeaderRegular)
+func printNewLine(w io.Writer) {
+	fmt.Fprintln(w)
+}
+
+func printAPIMethod(w io.Writer, m openapi.Operation) {
+	printHeader(w, m.Summary, HeaderNormal)
 	printNotEmpty(w, m.Description)
 	printMethod(w, m.Method)
 	printExtensions(w, m.CustomTags)
@@ -54,29 +58,23 @@ func printAPIMethod(w io.Writer, m openapi.APIMethod) {
 	printNewLine(w)
 }
 
-
 func printNotEmpty(w io.Writer, s string) {
 	if len(s) > 0 {
 		fmt.Fprintln(w, s)
 	}
 }
 
-
-func printMethod(w io.Writer, method string) {
-	printPair(w, "Method", fmt.Sprintf("{noformat}%s{noformat}", method))
+func printMethod(w io.Writer, m string) {
+	printPair(w, "Method", getNonformatted(m))
 }
 
-func printPair(w io.Writer, key string, value string) {
-	fmt.Fprintf(w, "*%s*: %s\n", key, value)
-}
-
-func printExtensions(w io.Writer, tags map[string]string ) {
+func printExtensions(w io.Writer, tags map[string]string) {
 	for t, v := range tags {
 		printPair(w, t, v)
 	}
 }
 
-func printParams(w  io.Writer, header string, params []openapi.APIParam, mandatory bool) {
+func printParams(w io.Writer, header string, params []openapi.Param, mandatory bool) {
 	if len(params) > 0 {
 
 		printHeader(w, header, HeaderLite)
@@ -89,72 +87,82 @@ func printParams(w  io.Writer, header string, params []openapi.APIParam, mandato
 	}
 }
 
+func printPair(w io.Writer, key string, value string) {
+	fmt.Fprintf(w, "%s: %s\n", getBold(key), value)
+}
+
 func printColumns(w io.Writer, mandatory bool) {
 
-	columns := []string { "Name", "Type"}
+	columns := []string{"Name", "Type"}
 	if mandatory {
 		columns = append(columns, "Mandatory")
 	}
 	columns = append(columns, "Description")
 
-	fmt.Fprint(w, "||")
+	fmt.Fprint(w, getHeaderCellDelimiter())
 
 	for _, c := range columns {
-		fmt.Fprint(w, " ", c, " ||")
+		fmt.Fprint(w, c, getHeaderCellDelimiter())
 	}
 
 	fmt.Fprintln(w)
 }
 
-func printParam(w io.Writer, p openapi.APIParam, prefix string, mandatory bool) {
+func printParam(w io.Writer, p openapi.Param, prefix string, mandatory bool) {
 
-	printCellDelimiter(w)
-	
-	n := getMonospaced(prefix + p.Name)
-	printCell(w, n)
-	
-	t := getParamType(p)
-	printCell(w, t)
+	fmt.Fprint(w, getCellDelimiter())
+	fmt.Fprint(w, getMonospaced(prefix+p.Name))
+	fmt.Fprint(w, getCellDelimiter())
+
+	fmt.Fprint(w, getParamType(p))
+	fmt.Fprint(w, getCellDelimiter())
 
 	if mandatory {
-		m := getCheck(p.Mandatory)
-		printCell(w, m)
+		fmt.Fprint(w, getCheck(p.Mandatory))
+		fmt.Fprint(w, getCellDelimiter())
 	}
 
-	printCell(w, p.Description)
-
-	printNewLine(w)
+	fmt.Fprint(w, p.Description)
+	fmt.Fprintln(w, getCellDelimiter())
 
 	prefix += p.Name + "."
 
-	for _, nestedParameter := range p.Schema.Attributes {
-		printParam(w, nestedParameter, prefix, mandatory)
+	for _, nestedParam := range p.Schema.Attributes {
+		printParam(w, nestedParam, prefix, mandatory)
 	}
 }
 
-func printCellDelimiter(w io.Writer) {
-	fmt.Fprint(w, "|")
-}
-
-func printCell(w io.Writer, s string){
-	fmt.Fprintf(w, " %s |", s)
+func getParamType(p openapi.Param) string {
+	s := p.Type
+	if len(p.Enum) > 0 {
+		delimiter := ""
+		s = ""
+		for _, v := range p.Enum {
+			s += delimiter + getMonospaced(v)
+			delimiter = getPipe()
+		}
+	}
+	return s
 }
 
 func getMonospaced(s string) string {
 	return fmt.Sprintf("{{%s}}", s)
 }
 
-func getParamType(p openapi.APIParam) string {
-	s := p.Type
-	if len(p.Enum) > 0 {
-		enumDelimiter := ""
-		s = ""
-		for _, enumValue := range p.Enum {
-			s += enumDelimiter + "{{" + enumValue + "}}"
-			enumDelimiter = " \\| "
-		}
-	}
-	return s
+func getNonformatted(s string) string {
+	return fmt.Sprintf("{noformat}%s{noformat}", s)
+}
+
+func getBold(s string) string {
+	return fmt.Sprintf("*%s*", s)
+}
+
+func getHeaderCellDelimiter() string {
+	return "||"
+}
+
+func getCellDelimiter() string {
+	return "|"
 }
 
 func getCheck(b bool) string {
@@ -165,6 +173,6 @@ func getCheck(b bool) string {
 	return check
 }
 
-func printNewLine(w io.Writer) {
-	fmt.Fprintln(w)
+func getPipe() string {
+	return " \\| "
 }

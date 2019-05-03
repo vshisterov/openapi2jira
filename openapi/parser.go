@@ -8,305 +8,203 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type APIGroup struct {
-	Name    string
-	Methods []APIMethod
+type Group struct {
+	Name       string
+	Operations []Operation
 }
 
-type APIMethod struct {
+type Operation struct {
 	Summary        string
 	Method         string
 	Description    string
-	QueryParams    []APIParam
-	RequestSchema  APIParamSchema
-	ResponseSchema APIParamSchema
-	Examples       []APIExample
+	QueryParams    []Param
+	RequestSchema  Schema
+	ResponseSchema Schema
+	Examples       []Example
 	CustomTags     map[string]string
 }
 
-type APIParam struct {
+type Param struct {
 	Name        string
 	Type        string
 	Description string
 	Mandatory   bool
-	Schema      APIParamSchema
+	Schema      Schema
 	Enum        []string
 }
 
-type APIParamSchema struct {
+type Schema struct {
 	Name               string
-	Attributes         []APIParam
+	Attributes         []Param
 	HasMandatoryParams bool
 }
 
-type APIExample struct {
+type Example struct {
 	Title    string
 	Request  string
 	Response string
 }
 
-type MapSlice yaml.MapSlice
+const DefaultGroup = "API Specifics"
 
-func Parse(fileName string) (map[string]APIGroup, error) {
-	spec, err := loadSpec(fileName)
+func Parse(s string) (map[string]Group, error) {
+
+	return ParseBytes([]byte(s))
+
+}
+
+func ParseFile(name string) (map[string]Group, error) {
+	data, err := ioutil.ReadFile(name)
 	if err != nil {
 		return nil, err
 	}
 
-	g := parse(spec)
+	g, err := ParseBytes(data)
+	if err != nil {
+		return nil, err
+	}
 
 	return g, nil
 }
 
-func loadSpec(f string) (MapSlice, error) {
-	m, err := readYaml(f)
-	return m, err
-}
-
-func readYaml(fileName string) (MapSlice, error) {
-	data, err := ioutil.ReadFile(fileName)
-	if err != nil {
-		return nil, err
-	}
-	m := MapSlice(nil)
+func ParseBytes(data []byte) (map[string]Group, error) {
+	m := yaml.MapSlice(nil)
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
 
-	return m, nil
+	g := parseSpec(m)
+
+	return g, nil
 }
 
-func parse(spec MapSlice) map[string]APIGroup {
+func parseSpec(s yaml.MapSlice) map[string]Group {
 
-	result := map[string]APIGroup{}
+	g := map[string]Group{}
+	d := map[string]Schema{}
 
-	definitions := map[string]APIParamSchema{}
-
-	for i := range spec {
-
-		tag := spec[i].Key.(string)
-
-		switch tag {
-
+	for _, item := range s {
+		switch item.Key.(string) {
 		case "paths":
-
-			result = parsePaths(spec[i].Value.(MapSlice))
-
+			g = parsePaths(item.Value.(yaml.MapSlice))
 		case "definitions":
 
-			definitionsNode := spec[i].Value.(MapSlice)
-
-			for _, definitionNode := range definitionsNode {
-
-				definition := APIParamSchema{}
-				definition.Name = definitionNode.Key.(string)
-
-				var attributes []APIParam
-				var requiredParameters []string
-
-				for _, definitionTagsNode := range definitionNode.Value.(MapSlice) {
-
-					switch definitionTagsNode.Key.(string) {
-					case "properties":
-
-						for _, propertyNode := range definitionTagsNode.Value.(MapSlice) {
-
-							attribute := APIParam{}
-
-							attribute.Name = propertyNode.Key.(string)
-
-							for _, propertyAttributeNode := range propertyNode.Value.(MapSlice) {
-								switch propertyAttributeNode.Key.(string) {
-								case "type":
-									attribute.Type = propertyAttributeNode.Value.(string)
-								case "description":
-									attribute.Description = propertyAttributeNode.Value.(string)
-								case "$ref":
-									attribute.Schema.Name = strings.TrimPrefix(propertyAttributeNode.Value.(string),
-										"#/definitions/")
-								case "items":
-									for _, itemsNode := range propertyAttributeNode.Value.(MapSlice) {
-
-										switch itemsNode.Key.(string) {
-										case "$ref":
-											attribute.Schema.Name = strings.TrimPrefix(itemsNode.Value.(string), "#/definitions/")
-										case "type":
-											attribute.Type = "array of " + itemsNode.Value.(string)
-										case "description":
-											attribute.Description = itemsNode.Value.(string)
-										}
-									}
-								case "enum":
-									for _, enumValueNode := range propertyAttributeNode.Value.([]interface{}) {
-										attribute.Enum = append(attribute.Enum, enumValueNode.(string))
-									}
-								}
-
-							}
-							attributes = append(attributes, attribute)
-						}
-					case "required":
-						for _, requiredNode := range definitionTagsNode.Value.([]interface{}) {
-							requiredParameters = append(requiredParameters, requiredNode.(string))
-						}
-					}
-
-				}
-
-				for requiredParameter := range requiredParameters {
-					attributes[requiredParameter].Mandatory = true
-					definition.HasMandatoryParams = true
-				}
-
-				definition.Attributes = attributes
-
-				definitions[definition.Name] = definition
-
-			}
-
+			d = parseDefinitions(item.Value.(yaml.MapSlice))
 		}
-
 	}
 
-	for _, definition := range definitions {
+	linkDefinitions(d)
+	linkSchemas(g, d)
 
-		for i, attribute := range definition.Attributes {
-
-			if len(attribute.Schema.Name) > 0 {
-
-				definitions[definition.Name].Attributes[i].Schema = definitions[attribute.Schema.Name]
-				if attribute.Type != "array" {
-					definitions[definition.Name].Attributes[i].Type = "struct"
-				}
-
-			}
-		}
-
-	}
-
-	for _, group := range result {
-
-		for i, method := range group.Methods {
-
-			if definition, ok := definitions[method.RequestSchema.Name]; ok {
-				result[group.Name].Methods[i].RequestSchema = definition
-			}
-
-			if definition, ok := definitions[method.ResponseSchema.Name]; ok {
-				result[group.Name].Methods[i].ResponseSchema = definition
-			}
-		}
-
-	}
-
-	return result
+	return g
 }
 
-func parsePaths(pathNodes MapSlice) map[string]APIGroup {
+func parsePaths(s yaml.MapSlice) map[string]Group {
 
-	result := map[string]APIGroup{}
+	g := map[string]Group{}
 
-	for _, pathNode := range pathNodes {
+	for i := range s {
+		path := s[i].Key.(string)
 
-		parsePath(pathNode, result)
+		fmt.Println("Parsing path", path)
 
+		for _, o := range s[i].Value.(yaml.MapSlice) {
+
+			parseOperation(o, g, path)
+
+		}
 	}
 
-	return result
+	return g
 
 }
 
-func parsePath(pathNode yaml.MapItem, groups map[string]APIGroup) {
-	path := pathNode.Key.(string)
-	fmt.Println("Parsing path", path)
-	for _, methodNode := range pathNode.Value.(MapSlice) {
+func parseOperation(s yaml.MapItem, groups map[string]Group, path string) {
 
-		parseMethod(methodNode, groups, path)
+	o := Operation{}
 
-	}
-}
-
-func parseMethod(methodNode yaml.MapItem, groups map[string]APIGroup, path string) {
-
-	httpMethod := strings.ToUpper(methodNode.Key.(string))
-
-	group, ok := groups["Unknown"]
+	group, ok := groups[DefaultGroup]
 	if !ok {
-		group = APIGroup{"Unknown", []APIMethod{}}
+		group = Group{DefaultGroup, []Operation{}}
 	}
 
-	method := APIMethod{}
-	method.CustomTags = map[string]string{}
-	method.Method = fmt.Sprintf("%s %s", httpMethod, path)
+	m := strings.ToUpper(s.Key.(string))
+	o.Method = fmt.Sprintf("%s %s", m, path)
 
-	for _, methodPropertyNode := range methodNode.Value.(MapSlice) {
+	o.CustomTags = map[string]string{}
 
-		methodPropertyName := methodPropertyNode.Key.(string)
+	for _, item := range s.Value.(yaml.MapSlice) {
 
-		switch methodPropertyNode.Key.(string) {
+		key := item.Key.(string)
+
+		switch key {
 
 		case "tags":
-			tag := methodPropertyNode.Value.([]interface{})[0].(string)
-			group = getGroupByName(groups, group, tag)
+			tag := item.Value.([]interface{})[0].(string)
+			group = findOrName(groups, group, tag)
 
 		case "summary":
-			method.Summary = methodPropertyNode.Value.(string)
+			o.Summary = item.Value.(string)
 
 		case "description":
-			method.Description = methodPropertyNode.Value.(string)
+			o.Description = item.Value.(string)
 
 		case "parameters":
-			for _, parameterNode := range methodPropertyNode.Value.([]interface{}) {
-				parseParameter(parameterNode, &method)
+			for _, p := range item.Value.([]interface{}) {
+				parseParameter(p, &o)
 			}
 
 		case "responses":
-			for _, responseNode := range methodPropertyNode.Value.(MapSlice) {
-				if responseNode.Key.(string) == "200" || responseNode.Key.(string) == "201" || responseNode.Key.(string) == "default" {
-					for _, responsePropertyNode := range responseNode.Value.(MapSlice) {
-						if responsePropertyNode.Key.(string) == "schema" {
-							for _, schemaPropertyNode := range responsePropertyNode.Value.(MapSlice) {
-								if schemaPropertyNode.Key.(string) == "$ref" {
-									method.ResponseSchema.Name = strings.TrimPrefix(schemaPropertyNode.Value.(string), "#/definitions/")
-								}
-								if schemaPropertyNode.Key.(string) == "items" {
-									for _, itemsPropertyNode := range schemaPropertyNode.Value.(MapSlice) {
-										if itemsPropertyNode.Key.(string) == "$ref" {
-											method.ResponseSchema.Name = strings.TrimPrefix(itemsPropertyNode.Value.(string), "#/definitions/")
-										}
-									}
-								}
+			for _, r := range item.Value.(yaml.MapSlice) {
+				parseResponse(r, &o)
+			}
+
+		}
+
+		if strings.HasPrefix(key, "x-") {
+			addCustomTag(o, key, item.Value.(string))
+		}
+
+	}
+	group.Operations = append(group.Operations, o)
+	groups[group.Name] = group
+}
+
+func parseResponse(responseNode yaml.MapItem, o *Operation) {
+	if responseNode.Key.(string) == "200" || responseNode.Key.(string) == "201" || responseNode.Key.(string) == "default" {
+		for _, responsePropertyNode := range responseNode.Value.(yaml.MapSlice) {
+			if responsePropertyNode.Key.(string) == "schema" {
+				for _, schemaPropertyNode := range responsePropertyNode.Value.(yaml.MapSlice) {
+					if schemaPropertyNode.Key.(string) == "$ref" {
+						o.ResponseSchema.Name = strings.TrimPrefix(schemaPropertyNode.Value.(string), "#/definitions/")
+					}
+					if schemaPropertyNode.Key.(string) == "items" {
+						for _, itemsPropertyNode := range schemaPropertyNode.Value.(yaml.MapSlice) {
+							if itemsPropertyNode.Key.(string) == "$ref" {
+								o.ResponseSchema.Name = strings.TrimPrefix(itemsPropertyNode.Value.(string), "#/definitions/")
 							}
 						}
 					}
 				}
 			}
-
 		}
-
-		if strings.HasPrefix(methodPropertyName, "x-") {
-			addCustomTag(method, methodPropertyName, methodPropertyNode.Value.(string))
-		}
-
 	}
-	group.Methods = append(group.Methods, method)
-	groups[group.Name] = group
 }
 
-func addCustomTag(method APIMethod, name string, value string) {
+func addCustomTag(method Operation, name string, value string) {
 	customTag := strings.Title(strings.ReplaceAll(strings.TrimPrefix(name, "x-"), "-", " "))
 	method.CustomTags[customTag] = value
 }
 
-func parseParameter(parameterNode interface{}, method *APIMethod) {
+func parseParameter(parameterNode interface{}, method *Operation) {
 
-	parameter := APIParam{}
+	parameter := Param{}
 
 	isQuery := false
 	isBody := false
 	isFormData := false
 
-	for _, parameterPropertyNode := range parameterNode.(MapSlice) {
+	for _, parameterPropertyNode := range parameterNode.(yaml.MapSlice) {
 
 		switch parameterPropertyNode.Key.(string) {
 
@@ -320,12 +218,12 @@ func parseParameter(parameterNode interface{}, method *APIMethod) {
 			parameter.Description = parameterPropertyNode.Value.(string)
 
 		case "schema":
-			for _, schemaPropertyNode := range parameterPropertyNode.Value.(MapSlice) {
+			for _, schemaPropertyNode := range parameterPropertyNode.Value.(yaml.MapSlice) {
 				if schemaPropertyNode.Key.(string) == "$ref" {
 					parameter.Schema.Name = strings.TrimPrefix(schemaPropertyNode.Value.(string), "#/definitions/")
 				}
 				if schemaPropertyNode.Key.(string) == "items" {
-					for _, itemsPropertyNode := range schemaPropertyNode.Value.(MapSlice) {
+					for _, itemsPropertyNode := range schemaPropertyNode.Value.(yaml.MapSlice) {
 						if itemsPropertyNode.Key.(string) == "$ref" {
 							parameter.Schema.Name = strings.TrimPrefix(itemsPropertyNode.Value.(string), "#/definitions/")
 						}
@@ -366,7 +264,7 @@ func parseParameter(parameterNode interface{}, method *APIMethod) {
 
 }
 
-func getGroupByName(groups map[string]APIGroup, group APIGroup, name string) APIGroup {
+func findOrName(groups map[string]Group, group Group, name string) Group {
 	existingGroup, ok := groups[name]
 	if ok {
 		group = existingGroup
@@ -374,4 +272,115 @@ func getGroupByName(groups map[string]APIGroup, group APIGroup, name string) API
 		group.Name = name
 	}
 	return group
+}
+
+func parseDefinitions(source yaml.MapSlice) map[string]Schema {
+
+	r := map[string]Schema{}
+
+	for _, item := range source {
+
+		definition := Schema{}
+		definition.Name = item.Key.(string)
+
+		var attributes []Param
+		var requiredParameters []string
+
+		for _, definitionTagsNode := range item.Value.(yaml.MapSlice) {
+
+			switch definitionTagsNode.Key.(string) {
+			case "properties":
+
+				for _, propertyNode := range definitionTagsNode.Value.(yaml.MapSlice) {
+
+					attribute := Param{}
+
+					attribute.Name = propertyNode.Key.(string)
+
+					for _, propertyAttributeNode := range propertyNode.Value.(yaml.MapSlice) {
+						switch propertyAttributeNode.Key.(string) {
+						case "type":
+
+							attribute.Type = propertyAttributeNode.Value.(string)
+						case "description":
+							attribute.Description = propertyAttributeNode.Value.(string)
+						case "$ref":
+							attribute.Schema.Name = strings.TrimPrefix(propertyAttributeNode.Value.(string),
+								"#/definitions/")
+						case "items":
+							for _, itemsNode := range propertyAttributeNode.Value.(yaml.MapSlice) {
+
+								switch itemsNode.Key.(string) {
+								case "$ref":
+									attribute.Schema.Name = strings.TrimPrefix(itemsNode.Value.(string), "#/definitions/")
+								case "type":
+									attribute.Type = "array of " + itemsNode.Value.(string)
+								case "description":
+									attribute.Description = itemsNode.Value.(string)
+								}
+							}
+						case "enum":
+							for _, enumValueNode := range propertyAttributeNode.Value.([]interface{}) {
+								attribute.Enum = append(attribute.Enum, enumValueNode.(string))
+							}
+						}
+
+					}
+					attributes = append(attributes, attribute)
+				}
+			case "required":
+				for _, requiredNode := range definitionTagsNode.Value.([]interface{}) {
+					requiredParameters = append(requiredParameters, requiredNode.(string))
+				}
+			}
+
+		}
+
+		for requiredParameter := range requiredParameters {
+			attributes[requiredParameter].Mandatory = true
+			definition.HasMandatoryParams = true
+		}
+
+		definition.Attributes = attributes
+
+		r[definition.Name] = definition
+
+	}
+
+	return r
+}
+
+func linkDefinitions(d map[string]Schema) {
+	for k := range d {
+
+		for i, a := range d[k].Attributes {
+
+			if len(a.Schema.Name) > 0 {
+
+				d[k].Attributes[i].Schema = d[a.Schema.Name]
+				if a.Type != "array" {
+					d[k].Attributes[i].Type = "struct"
+				}
+
+			}
+		}
+
+	}
+}
+
+func linkSchemas(g map[string]Group, s map[string]Schema) {
+	for k := range g {
+
+		for i, o := range g[k].Operations {
+
+			if schema, ok := s[o.RequestSchema.Name]; ok {
+				g[k].Operations[i].RequestSchema = schema
+			}
+
+			if schema, ok := s[o.ResponseSchema.Name]; ok {
+				g[k].Operations[i].ResponseSchema = schema
+			}
+		}
+
+	}
 }
