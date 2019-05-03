@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"github.com/hoisie/web"
 	"github.com/vshisterov/openapi2jira/jira"
 	"github.com/vshisterov/openapi2jira/openapi"
 	"io/ioutil"
@@ -17,11 +19,29 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println("Converting file:", in)
+	if len(flag.Args()) > 0 && flag.Arg(0) == "serve" {
 
-	Convert(in, out)
+		web.Post("/convert", convert)
+		web.Run("0.0.0.0:9999")
 
-	fmt.Println("Completed:", out)
+	} else {
+		fmt.Println("Converting file:", in)
+		Convert(in, out)
+		fmt.Println("Completed:", out)
+	}
+
+}
+
+func convert(ctx *web.Context) string {
+
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(ctx.Request.Body)
+	source := buf.String()
+
+	g, _ := openapi.Parse(source)
+	s := jira.ToJira(g)
+
+	return s
 }
 
 func Convert(in string, out string) {
