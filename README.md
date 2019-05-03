@@ -26,6 +26,6 @@ import (
   
 ```
 
-## Acknowledgments
-
-* Thanks [Gustavo Niemeyer](https://github.com/niemeyer) for the [yaml package](https://github.com/go-yaml/yaml)
+## Built With
+* [go-yaml](https://github.com/go-yaml/yaml) - YAML support for the Go language
+* [web.go](https://github.com/hoisie/web) - the easiest way to create web applications with Go
