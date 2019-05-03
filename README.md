@@ -1,6 +1,6 @@
 # OpenAPI to Jira
 
-The tool converts API spec in OpenAPI fka Swagger 2.0 format to text in [JIRA-compatible](https://jira.atlassian.com/secure/WikiRendererHelpAction.jspa?section=all) format, 
+The tool converts API spec in [OpenAPI fka Swagger 2.0](https://swagger.io/docs/specification/2-0) format to text in [JIRA-compatible](https://jira.atlassian.com/secure/WikiRendererHelpAction.jspa?section=all) format, 
 which can be then used to create User Stories or Tasks or whatever ticket types you use in JIRA for API development.
 
 ## Usage
