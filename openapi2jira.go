@@ -17,7 +17,7 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println("Conveting file:", in)
+	fmt.Println("Converting file:", in)
 
 	Convert(in, out)
 
