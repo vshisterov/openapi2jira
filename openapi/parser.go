@@ -162,7 +162,7 @@ func parseOperation(s yaml.MapItem, groups map[string]Group, path string) {
 		}
 
 		if strings.HasPrefix(key, "x-") {
-			addCustomTag(o, key, item.Value.(string))
+			addCustomTag(o, key, fmt.Sprint(item.Value))
 		}
 
 	}
@@ -336,9 +336,13 @@ func parseDefinitions(source yaml.MapSlice) map[string]Schema {
 
 		}
 
-		for requiredParameter := range requiredParameters {
-			attributes[requiredParameter].Mandatory = true
-			definition.HasMandatoryParams = true
+		for i := range requiredParameters {
+			for j := range attributes {
+				if (attributes[j].Name == requiredParameters[i]) {
+					attributes[j].Mandatory = true
+					definition.HasMandatoryParams = true
+				}
+			}
 		}
 
 		definition.Attributes = attributes
