@@ -110,26 +110,36 @@ func printColumns(w io.Writer, mandatory bool) {
 
 func printParam(w io.Writer, p openapi.Param, prefix string, mandatory bool) {
 
-	fmt.Fprint(w, getCellDelimiter())
-	fmt.Fprint(w, getMonospaced(prefix+p.Name))
-	fmt.Fprint(w, getCellDelimiter())
+	printCellDelimiter(w)
+	printCellContent(w, getMonospaced(prefix+p.Name))
+	printCellDelimiter(w)
 
-	fmt.Fprint(w, getParamType(p))
-	fmt.Fprint(w, getCellDelimiter())
+	printCellContent(w, getParamType(p))
+	printCellDelimiter(w)
 
 	if mandatory {
-		fmt.Fprint(w, getCheck(p.Mandatory))
-		fmt.Fprint(w, getCellDelimiter())
+		printCellContent(w, getCheck(p.Mandatory))
+		printCellDelimiter(w)
 	}
 
-	fmt.Fprint(w, p.Description)
-	fmt.Fprintln(w, getCellDelimiter())
+	printCellContent(w, p.Description)
+	printCellDelimiter(w)
+
+	printNewLine(w)
 
 	prefix += p.Name + "."
 
 	for _, nestedParam := range p.Schema.Attributes {
 		printParam(w, nestedParam, prefix, mandatory)
 	}
+}
+
+func printCellContent(w io.Writer, s string) (int, error) {
+	return fmt.Fprintf(w, " %s ", s)
+}
+
+func printCellDelimiter(w io.Writer) {
+	fmt.Fprint(w, getCellDelimiter())
 }
 
 func getParamType(p openapi.Param) string {
